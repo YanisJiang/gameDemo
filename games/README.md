@@ -1,9 +1,18 @@
 # games
 
-每个子目录是一个独立的小点子 demo。
+每个子目录是一个独立小点子 demo。
 
-新建时复制此约定即可：
+推荐布局：
 
-1. 建目录 `games/<name>/`
-2. 写该游戏自己的 `README.md`（怎么玩、怎么编译）
-3. 源码与资源放在该目录内，不依赖兄弟项目
+```text
+games/<name>/
+  public/       # .hpp
+  private/      # .cpp
+  dist/         # 发布用 exe（本地构建，一般不入库）
+  build.bat
+  README.md
+```
+
+当前：
+
+- `baohu-pinghe` — 暴虎冯河

@@ -1,40 +1,37 @@
 # gameDemo
 
-小点子游戏合集仓库：每个点子一个独立小 demo，互不耦合，方便试玩法和留档。
+小点子游戏合集：每个点子一个目录，互不耦合。
 
-## 结构
+## 目录
 
 ```text
-gamesDemo/
-├── games/          # 每个子目录 = 一个小游戏
-│   └── <name>/
-├── docs/           # 跨项目的设计/计划文档（可选）
+gameDemo/
+├── games/                      # 各小游戏源码
+│   └── baohu-pinghe/
+│       ├── public/             # 头文件
+│       ├── private/            # 源码
+│       └── dist/               # 发布 exe
+├── docs/superpowers/
+│   ├── specs/                  # 设计规格
+│   └── plans/                  # 实现计划
 ├── README.md
 └── .gitignore
 ```
 
-约定：
+## 当前游戏
 
-- 新点子在 `games/<简短英文名>/` 下从零开始（自带 README、源码、本地构建说明）
-- 设计规格可放在该游戏目录内，或放在 `docs/superpowers/specs/`
-- 不引入统一引擎或公共框架，除非多个 demo 明确要复用
+| 目录 | 说明 | 怎么玩 |
+|------|------|--------|
+| [`games/baohu-pinghe/`](games/baohu-pinghe/) | 三关限时生存 + 中/英；蓄力撞虎 / 反冲落水 | 运行 `games/baohu-pinghe/dist/baohu.exe` |
 
-## 当前点子
+## 文档
 
-| 目录 | 说明 | 状态 |
-|------|------|------|
-| （待建）`games/baohu-fenghe/` | 暴虎冯河：蓄力撞虎 / 反冲落水，C++ 控制台限时生存 | 规格已写，代码未开 |
+| 文件 | 内容 |
+|------|------|
+| `docs/superpowers/specs/2026-09-19-baohu-fenghe-console-demo-design.md` | 初版单关设计（早期文件名用了 fenghe） |
+| `docs/superpowers/specs/2026-09-19-baohu-pinghe-levels-i18n-design.md` | 三关 + 多语言设计 |
+| `docs/superpowers/plans/` | 对应实现计划 |
 
-规格：`docs/superpowers/specs/2026-09-19-baohu-fenghe-console-demo-design.md`
+## Git
 
-## 本地 Git
-
-本目录已是 Git 仓库。日常：
-
-```bash
-git status
-git add …
-git commit -m "…"
-```
-
-若需要远端备份（GitHub / Cursor 等），再说一声即可配置。
+构建产物（`*.exe` / `*.obj`）已在 `.gitignore` 中忽略。分发时拷贝 `games/<name>/dist/` 下的 exe。

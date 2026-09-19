@@ -6,6 +6,8 @@
 build/
 out/
 cmake-build-*/
+**/dist/*
+!**/dist/.gitkeep
 *.exe
 *.obj
 *.o
