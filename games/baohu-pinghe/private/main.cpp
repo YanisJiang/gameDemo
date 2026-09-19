@@ -12,6 +12,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <thread>
 #include <vector>
@@ -22,8 +24,8 @@ constexpr int kSlots = 36;
 constexpr double kTickSec = 1.0 / 40.0;
 constexpr int kContentRows = 10;
 
-enum class CellKind { Road, Threat, Tiger, Player, Hit, River };
-enum class AppMode { SelectLang, Playing, LevelClear, AllClear, Dead };
+enum class CellKind { Road, Threat, Tiger, Player, Hit, River, Boat };
+enum class AppMode { Cover, SelectLevel, Playing, LevelClear, AllClear, Dead };
 
 void enableAnsi() {
   HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -118,19 +120,32 @@ std::string buildChargeBar(double charge01, int width = 8) {
   return bar;
 }
 
-void paint(CellKind kind, int row) {
+void paint(CellKind kind, int row, bool windupThreat, bool madPlayer) {
   switch (kind) {
     case CellKind::Tiger:
       std::fputs("\x1b[48;5;208;38;5;16m虎\x1b[0m", stdout);
       break;
     case CellKind::Player:
-      std::fputs("\x1b[48;5;48;38;5;16m人\x1b[0m", stdout);
+      if (madPlayer) {
+        std::fputs("\x1b[48;5;201;38;5;16m疯\x1b[0m", stdout);
+      } else {
+        std::fputs("\x1b[48;5;48;38;5;16m人\x1b[0m", stdout);
+      }
       break;
     case CellKind::Hit:
       std::fputs("\x1b[48;5;196;38;5;231m撞\x1b[0m", stdout);
       break;
     case CellKind::Threat:
-      if (row == 0) {
+      // Windup：更亮的红，提示即将猛扑
+      if (windupThreat) {
+        if (row == 0) {
+          std::fputs("\x1b[48;5;196;38;5;231m▀▀\x1b[0m", stdout);
+        } else if (row == 2) {
+          std::fputs("\x1b[48;5;196;38;5;231m▄▄\x1b[0m", stdout);
+        } else {
+          std::fputs("\x1b[48;5;196;38;5;231m!!\x1b[0m", stdout);
+        }
+      } else if (row == 0) {
         std::fputs("\x1b[48;5;52;38;5;224m▀▀\x1b[0m", stdout);
       } else if (row == 2) {
         std::fputs("\x1b[48;5;52;38;5;224m▄▄\x1b[0m", stdout);
@@ -140,6 +155,9 @@ void paint(CellKind kind, int row) {
       break;
     case CellKind::River:
       std::fputs("\x1b[48;5;27;38;5;231m河\x1b[0m", stdout);
+      break;
+    case CellKind::Boat:
+      std::fputs("\x1b[48;5;94;38;5;231m舟\x1b[0m", stdout);
       break;
     case CellKind::Road:
     default:
@@ -157,13 +175,42 @@ void paint(CellKind kind, int row) {
 void drawScene(const GameState& state, const GameConfig& config,
                int riverSlots) {
   riverSlots = std::clamp(riverSlots, 2, kSlots - 8);
-  const int trackSlots = kSlots - riverSlots;
+
+  // 涨潮：河面格子向左变多，一眼能看出“河在推进”
+  int dynamicRiver = riverSlots;
+  if (config.tideEnabled) {
+    const double span =
+        std::max(0.01, config.riverX - config.tideMinRiverX);
+    const double progress =
+        std::clamp((config.riverX - state.riverX) / span, 0.0, 1.0);
+    dynamicRiver =
+        riverSlots +
+        static_cast<int>(std::lround(progress * config.tideExtraRiverSlots));
+    dynamicRiver = std::clamp(dynamicRiver, riverSlots, kSlots - 6);
+  }
+
+  const int trackSlots = kSlots - dynamicRiver;
 
   std::vector<CellKind> mid(static_cast<size_t>(kSlots), CellKind::Road);
   std::vector<char> inThreat(static_cast<size_t>(kSlots), 0);
 
   for (int i = trackSlots; i < kSlots; ++i) {
     mid[static_cast<size_t>(i)] = CellKind::River;
+  }
+
+  int boatSlot = -1;
+  const double riverSpan =
+      std::max(1.6, (config.boatOffset + config.boatHalfWidth) * 3.0);
+  auto toRiverSlot = [&](double x) {
+    const double into = std::max(0.0, x - state.riverX);
+    int idx = static_cast<int>(
+        std::lround((into / riverSpan) * (dynamicRiver - 1)));
+    idx = std::clamp(idx, 0, dynamicRiver - 1);
+    return trackSlots + idx;
+  };
+  if (config.boatEnabled && dynamicRiver > 0) {
+    boatSlot = toRiverSlot(state.boatX);
+    mid[static_cast<size_t>(boatSlot)] = CellKind::Boat;
   }
 
   const bool lethal =
@@ -175,19 +222,32 @@ void drawScene(const GameState& state, const GameConfig& config,
     px = tx + 0.01;
   }
 
-  int playerSlot =
-      worldToSlot(px, config.worldMinX, config.riverX, trackSlots);
+  const double riverBound = state.riverX;
+  int playerSlot = 0;
+  if (px >= riverBound - 1e-9 && dynamicRiver > 0) {
+    const bool aboard =
+        config.boatEnabled &&
+        std::abs(px - state.boatX) <= config.boatHalfWidth + 1e-9;
+    if (aboard && boatSlot >= 0) {
+      playerSlot = boatSlot;  // 过关时人必须站在舟上，不能画在旁边的河里
+    } else {
+      playerSlot = toRiverSlot(px);
+    }
+  } else {
+    playerSlot =
+        worldToSlot(px, config.worldMinX, riverBound, trackSlots);
+  }
   int tigerSlot =
-      worldToSlot(tx, config.worldMinX, config.riverX, trackSlots);
-  if (tigerSlot >= playerSlot) {
+      worldToSlot(tx, config.worldMinX, riverBound, trackSlots);
+  if (tigerSlot >= playerSlot && playerSlot < trackSlots) {
     tigerSlot = std::max(0, playerSlot - 1);
   }
 
   int threatEnd = worldToSlot(tx + config.meleeDist, config.worldMinX,
-                              config.riverX, trackSlots);
+                              riverBound, trackSlots);
   threatEnd = std::min(threatEnd, trackSlots - 1);
 
-  if (lethal) {
+  if (lethal && playerSlot < trackSlots) {
     threatEnd = std::max(threatEnd, playerSlot);
     playerSlot = std::max(playerSlot, tigerSlot + 1);
     threatEnd = playerSlot;
@@ -199,42 +259,110 @@ void drawScene(const GameState& state, const GameConfig& config,
   }
 
   if (state.animSec > 0.0 && state.impactHit && !lethal) {
-    const int hitSlot = (tigerSlot + playerSlot) / 2;
-    if (hitSlot != tigerSlot && hitSlot != playerSlot) {
+    const int hitSlot = (tigerSlot + std::min(playerSlot, trackSlots - 1)) / 2;
+    if (hitSlot != tigerSlot && hitSlot != playerSlot && hitSlot < trackSlots) {
       mid[static_cast<size_t>(hitSlot)] = CellKind::Hit;
     }
   }
 
-  mid[static_cast<size_t>(tigerSlot)] = CellKind::Tiger;
+  if (tigerSlot >= 0 && tigerSlot < trackSlots) {
+    mid[static_cast<size_t>(tigerSlot)] = CellKind::Tiger;
+  }
   mid[static_cast<size_t>(playerSlot)] = CellKind::Player;
+  if (boatSlot >= 0 && boatSlot != playerSlot &&
+      mid[static_cast<size_t>(boatSlot)] != CellKind::Player) {
+    mid[static_cast<size_t>(boatSlot)] = CellKind::Boat;
+  }
+
+  const bool windupThreat =
+      config.feintEnabled && state.feintPhase == FeintPhase::Windup;
 
   for (int row = 0; row < 3; ++row) {
     printPad(kSlots * 2);
     for (int i = 0; i < kSlots; ++i) {
       CellKind kind = CellKind::Road;
       if (i >= trackSlots) {
-        kind = CellKind::River;
+        if (config.boatEnabled && i == boatSlot && row != 1) {
+          kind = CellKind::Boat;
+        } else if (row == 1) {
+          kind = mid[static_cast<size_t>(i)];
+        } else {
+          kind = CellKind::River;
+        }
       } else if (row == 1) {
         kind = mid[static_cast<size_t>(i)];
       } else if (inThreat[static_cast<size_t>(i)]) {
         kind = CellKind::Threat;
       }
-      paint(kind, row);
+      paint(kind, row, windupThreat && kind == CellKind::Threat,
+            config.madSlipEnabled);
     }
     endLine();
   }
 }
 
-void drawLangSelect() {
+void drawCoverStrip() {
+  const int tigerSlot = 8;
+  const int playerSlot = 18;
+  const int riverStart = 26;
+  for (int row = 0; row < 3; ++row) {
+    printPad(kSlots * 2);
+    for (int i = 0; i < kSlots; ++i) {
+      CellKind kind = CellKind::Road;
+      if (i >= riverStart) {
+        kind = CellKind::River;
+      } else if (i == tigerSlot && row == 1) {
+        kind = CellKind::Tiger;
+      } else if (i == playerSlot && row == 1) {
+        kind = CellKind::Player;
+      } else if (i > tigerSlot && i < playerSlot) {
+        kind = CellKind::Threat;
+      }
+      paint(kind, row, false, false);
+    }
+    endLine();
+  }
+}
+
+void drawCover() {
   beginFrame();
-  const int topPad = (consoleRows() - 4) / 2;
+  const int lines = 8;
+  const int topPad = std::max(0, (consoleRows() - lines) / 2);
   for (int i = 0; i < topPad; ++i) {
     printBlankLine();
   }
   printCenteredLine(tr("game.title"));
   printBlankLine();
-  printCenteredLine(tr("lang.prompt"));
-  for (int i = 0; i < 4; ++i) {
+  printCenteredLine(tr("cover.tagline"));
+  printBlankLine();
+  drawCoverStrip();
+  printBlankLine();
+  printCenteredLine(tr("cover.prompt"));
+  for (int i = 0; i < 2; ++i) {
+    printBlankLine();
+  }
+  std::fflush(stdout);
+}
+
+void drawLevelSelect() {
+  beginFrame();
+  const int lines = 5 + levelCount();
+  const int topPad = std::max(0, (consoleRows() - lines) / 2);
+  for (int i = 0; i < topPad; ++i) {
+    printBlankLine();
+  }
+  printCenteredLine(tr("game.title"));
+  printBlankLine();
+  printCenteredLine(tr("select.level"));
+  printBlankLine();
+  for (int i = 0; i < levelCount(); ++i) {
+    char line[160];
+    std::snprintf(line, sizeof(line), "%d  %s", i + 1, tr(levelAt(i).titleKey));
+    printCenteredLine(line);
+  }
+  printBlankLine();
+  printCenteredLine(tr("select.lang"));
+  for (int i = 0; i < 2; ++i) {
     printBlankLine();
   }
   std::fflush(stdout);
@@ -257,7 +385,7 @@ void drawGame(const GameState& state, const LevelConfig& level, int levelIndex,
   printCenteredLine(levelLine);
 
   if (mode == AppMode::Playing) {
-    printCenteredLine(tr("hud.hint"));
+    printCenteredLine(tr(level.hintKey));
   } else if (mode == AppMode::LevelClear) {
     printCenteredLine(tr("end.level_clear"));
   } else if (mode == AppMode::AllClear) {
@@ -309,17 +437,56 @@ void drainConsoleKeys() {
   }
 }
 
+// 调试：baohu.exe --level 2 [--lang zh|en]
+// 关卡为 1-based；省略 --lang 时默认中文并跳过选语言
+bool parseArgs(int argc, char** argv, int* outLevelIndex, Locale* outLocale,
+               bool* outSkipLang) {
+  *outLevelIndex = 0;
+  *outLocale = Locale::Zh;
+  *outSkipLang = false;
+  for (int i = 1; i < argc; ++i) {
+    if ((std::strcmp(argv[i], "--level") == 0 ||
+         std::strcmp(argv[i], "-l") == 0) &&
+        i + 1 < argc) {
+      int n = std::atoi(argv[++i]);
+      if (n < 1) {
+        n = 1;
+      }
+      if (n > levelCount()) {
+        n = levelCount();
+      }
+      *outLevelIndex = n - 1;
+      *outSkipLang = true;
+    } else if (std::strcmp(argv[i], "--lang") == 0 && i + 1 < argc) {
+      ++i;
+      if (std::strcmp(argv[i], "en") == 0 || std::strcmp(argv[i], "EN") == 0) {
+        *outLocale = Locale::En;
+      } else {
+        *outLocale = Locale::Zh;
+      }
+      *outSkipLang = true;
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   SetConsoleOutputCP(65001);
   SetConsoleCP(65001);
   enableAnsi();
   hideCursor();
 
-  AppMode mode = AppMode::SelectLang;
-  int levelIndex = 0;
-  LevelConfig level = levelAt(0);
+  int bootLevel = 0;
+  Locale bootLocale = Locale::Zh;
+  bool skipLang = false;
+  parseArgs(argc, argv, &bootLevel, &bootLocale, &skipLang);
+  setLocale(bootLocale);
+
+  AppMode mode = skipLang ? AppMode::Playing : AppMode::Cover;
+  int levelIndex = bootLevel;
+  LevelConfig level = levelAt(levelIndex);
   GameState state = makeInitialState(level.game);
   bool prevSpace = false;
   bool menuArmed = false;
@@ -346,19 +513,48 @@ int main() {
     drawGame(state, level, levelIndex, mode);
   };
 
+  auto backToSelect = [&]() {
+    mode = AppMode::SelectLevel;
+    drainConsoleKeys();
+    prevMenuQ = true;
+    drawLevelSelect();
+  };
+
   std::fputs("\x1b[2J", stdout);
-  drawLangSelect();
+  if (skipLang) {
+    startLevel(bootLevel);
+  } else {
+    drawCover();
+  }
 
   while (true) {
-    if (mode == AppMode::SelectLang) {
+    if (mode == AppMode::Cover) {
+      drawCover();
+      if (_kbhit()) {
+        (void)_getch();
+        mode = AppMode::SelectLevel;
+        drainConsoleKeys();
+        drawLevelSelect();
+      } else {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      }
+      continue;
+    }
+
+    if (mode == AppMode::SelectLevel) {
+      drawLevelSelect();
       if (_kbhit()) {
         const int ch = _getch();
-        if (ch == '2') {
-          setLocale(Locale::En);
-        } else {
-          setLocale(Locale::Zh);
+        if (ch == 'q' || ch == 'Q') {
+          break;
         }
-        startLevel(0);
+        if (ch == 'z' || ch == 'Z') {
+          setLocale(Locale::Zh);
+        } else if (ch == 'e' || ch == 'E') {
+          setLocale(Locale::En);
+        } else if (ch >= '1' && ch <= '0' + levelCount()) {
+          startLevel(ch - '1');
+        }
       } else {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
       }
@@ -367,14 +563,11 @@ int main() {
 
     if (mode == AppMode::Playing) {
       const bool down = spaceDown();
+      state.spaceHeld = down;
       if (down && !prevSpace) {
         setCharging(state, level.game, true);
       } else if (!down && prevSpace) {
         setCharging(state, level.game, false);
-      } else if (down) {
-        state.charging = true;
-      } else {
-        state.charging = false;
       }
       prevSpace = down;
 
@@ -430,7 +623,8 @@ int main() {
     prevMenuQ = mQ;
 
     if (pressQ) {
-      break;
+      backToSelect();
+      continue;
     }
 
     if (mode == AppMode::LevelClear) {

@@ -13,11 +13,24 @@ static void enforceTigerLeftOfPlayer(GameState& state, const GameConfig& config)
   }
 }
 
+static bool onBoat(const GameState& state, const GameConfig& config) {
+  if (!config.boatEnabled) {
+    return false;
+  }
+  return std::abs(state.playerX - state.boatX) <= config.boatHalfWidth + 1e-9;
+}
+
+static void syncBoat(GameState& state, const GameConfig& config) {
+  if (config.boatEnabled) {
+    state.boatX = state.riverX + config.boatOffset;
+  }
+}
+
 static void checkTerminal(GameState& state, const GameConfig& config) {
   if (state.outcome != Outcome::Playing) {
     return;
   }
-  if (state.playerX >= config.riverX) {
+  if (state.playerX >= state.riverX) {
     state.outcome = Outcome::DeathRiver;
     state.animSec = 0.0;
     return;
@@ -40,10 +53,16 @@ GameState makeInitialState(const GameConfig& config) {
   GameState s;
   s.playerX = config.playerStartX;
   s.tigerX = config.tigerStartX;
+  s.riverX = config.riverX;
+  s.tideRising = true;
+  s.boatX = config.riverX + config.boatOffset;
   s.timeLeft = config.surviveSec;
   s.charge01 = 0.0;
+  s.chargeRising = true;
   s.charging = false;
   s.walkingAway = false;
+  s.spaceHeld = false;
+  s.chargeHoldSec = 0.0;
   s.outcome = Outcome::Playing;
   s.animSec = 0.0;
   s.animDur = 0.0;
@@ -52,6 +71,8 @@ GameState makeInitialState(const GameConfig& config) {
   s.animTigerFrom = s.tigerX;
   s.animTigerTo = s.tigerX;
   s.impactHit = false;
+  s.feintPhase = FeintPhase::Approach;
+  s.feintTimer = config.feintEnabled ? config.feintInterval : 0.0;
   enforceTigerLeftOfPlayer(s, config);
   return s;
 }
@@ -85,6 +106,7 @@ void tryDash(GameState& state, const GameConfig& config) {
   const double p = std::clamp(state.charge01, 0.0, 1.0);
   state.charge01 = 0.0;
   state.charging = false;
+  state.chargeHoldSec = 0.0;
 
   if (p <= 0.0) {
     return;
@@ -92,6 +114,27 @@ void tryDash(GameState& state, const GameConfig& config) {
 
   const double playerBefore = state.playerX;
   const double tigerBefore = state.tigerX;
+
+  if (config.puppetTigerEnabled) {
+    // 表象：人在冲刺；实际：虎扑向人（低蓄也有保底扑距）
+    const double lunge =
+        std::max(config.puppetLungeMin, p * config.puppetLungeRange);
+    state.tigerX += lunge;
+    const double contact = state.playerX - config.meleeDist;
+    bool hit = false;
+    if (state.tigerX >= contact - 1e-9) {
+      state.tigerX = contact;
+      hit = true;
+    }
+    if (state.tigerX < config.worldMinX) {
+      state.tigerX = config.worldMinX;
+    }
+    beginAnim(state, config, playerBefore, state.playerX, tigerBefore,
+              state.tigerX, hit);
+    checkTerminal(state, config);
+    return;
+  }
+
   const double contactX = state.tigerX + config.hitRadius;
   const double dashDist = p * config.dashRange;
   const double reachNeeded = state.playerX - contactX;
@@ -120,6 +163,13 @@ void tryDash(GameState& state, const GameConfig& config) {
               state.tigerX, false);
   }
 
+  syncBoat(state, config);
+  if (onBoat(state, config)) {
+    state.outcome = Outcome::Win;
+    state.animSec = 0.0;
+    return;
+  }
+
   checkTerminal(state, config);
 }
 
@@ -128,15 +178,19 @@ void setCharging(GameState& state, const GameConfig& config, bool down) {
     return;
   }
 
+  state.spaceHeld = down;
+
   if (down) {
     if (!state.charging) {
       state.charging = true;
       state.charge01 = 0.0;
+      state.chargeRising = true;
+      state.chargeHoldSec = 0.0;
     }
     return;
   }
 
-  if (state.charging) {
+  if (state.charging || state.charge01 > 0.0) {
     tryDash(state, config);
   }
 }
@@ -163,27 +217,139 @@ void tick(GameState& state, const GameConfig& config, double dt) {
     state.animSec = std::max(0.0, state.animSec - dt);
   }
 
-  if (state.charging) {
-    state.charge01 =
-        std::min(1.0, state.charge01 + dt / config.chargeFullSec);
+  state.charging = state.spaceHeld;
+
+  if (state.spaceHeld) {
+    // 蓄力：0→1→0 循环；条=真实出手
+    const double rate = dt / std::max(0.05, config.chargeFullSec);
+    const double before = state.charge01;
+    const bool wasRising = state.chargeRising;
+    if (state.chargeRising) {
+      state.charge01 += rate;
+      if (state.charge01 >= 1.0) {
+        state.charge01 = 1.0;
+        state.chargeRising = false;
+      }
+    } else {
+      state.charge01 -= rate;
+      if (state.charge01 <= 0.0) {
+        state.charge01 = 0.0;
+        state.chargeRising = true;
+      }
+    }
+
+    bool slip = false;
+    if (config.madSlipEnabled) {
+      // 第一次顶满：上升沿碰到 1.0 → 手滑（轻点永远碰不到）
+      if (config.madSlipOnPeak && wasRising && before < 1.0 &&
+          state.charge01 >= 1.0 - 1e-12) {
+        slip = true;
+      }
+      if (config.madSlipHoldSec > 0.0) {
+        state.chargeHoldSec += dt;
+        if (state.chargeHoldSec >= config.madSlipHoldSec &&
+            state.charge01 > 0.0) {
+          slip = true;
+        }
+      }
+    }
+
+    if (slip) {
+      tryDash(state, config);
+      if (state.outcome == Outcome::Playing && state.spaceHeld) {
+        state.chargeRising = true;
+      }
+    }
+  } else {
+    state.chargeHoldSec = 0.0;
   }
 
-  // 向河漂：蓄力时也继续向右，但减速；撞击动画期间暂停
+  // Tide: flood (left) then ebb (right), loop
+  if (config.tideEnabled) {
+    const double maxX = config.riverX;
+    const double minX = config.tideMinRiverX;
+    if (state.tideRising) {
+      state.riverX -= config.tideSpeed * dt;
+      if (state.riverX <= minX) {
+        state.riverX = minX;
+        state.tideRising = false;
+      }
+    } else {
+      state.riverX += config.tideSpeed * dt;
+      if (state.riverX >= maxX) {
+        state.riverX = maxX;
+        state.tideRising = true;
+      }
+    }
+  }
+
+  syncBoat(state, config);
+
+  // Feint state machine
+  if (config.feintEnabled) {
+    state.feintTimer -= dt;
+    if (state.feintTimer <= 0.0) {
+      if (state.feintPhase == FeintPhase::Approach) {
+        state.feintPhase = FeintPhase::Windup;
+        state.feintTimer = config.feintWindupSec;
+      } else if (state.feintPhase == FeintPhase::Windup) {
+        state.feintPhase = FeintPhase::Lunge;
+        state.feintTimer = config.feintLungeSec;
+      } else {
+        state.feintPhase = FeintPhase::Approach;
+        state.feintTimer = config.feintInterval;
+      }
+    }
+  }
+
+  // Walk
   if (state.animSec <= 0.0) {
-    const double speed = state.charging
-                             ? config.walkSpeed * config.chargeWalkFactor
-                             : config.walkSpeed;
-    state.playerX += speed * dt;
+    if (config.puppetTigerEnabled) {
+      // 没按：往河走；按住：往虎撞（像疯子）——在中间带点按才能活
+      if (state.spaceHeld) {
+        state.playerX -= config.puppetChargeRushSpeed * dt;
+      } else {
+        state.playerX += config.walkSpeed * dt;
+      }
+    } else {
+      double speed = state.charging ? config.walkSpeed * config.chargeWalkFactor
+                                    : config.walkSpeed;
+      if (config.madSlipEnabled && state.charging) {
+        speed *= config.madChargeWalkBoost;
+      }
+      state.playerX += speed * dt;
+    }
   }
 
-  // 蓄力时老虎加速；人冲刺动画期间老虎减速
+  // Tiger movement
   double tigerSpd = config.tigerSpeed;
-  if (state.animSec > 0.0) {
-    tigerSpd *= config.dashTigerSpeedFactor;
+  if (config.puppetTigerEnabled) {
+    // 蓄力不改变虎步态；只有松手虎扑突变
+    if (state.animSec > 0.0) {
+      tigerSpd = 0.0;
+    } else {
+      tigerSpd = config.tigerSpeed;
+    }
+  } else if (config.feintEnabled) {
+    if (state.feintPhase == FeintPhase::Windup) {
+      tigerSpd = -config.feintRetreatSpeed;
+    } else if (state.feintPhase == FeintPhase::Lunge) {
+      tigerSpd = config.tigerSpeed * config.feintLungeFactor;
+    } else if (state.charging) {
+      tigerSpd *= config.chargeTigerSpeedFactor;
+    }
   } else if (state.charging) {
     tigerSpd *= config.chargeTigerSpeedFactor;
   }
+
+  if (!config.puppetTigerEnabled && state.animSec > 0.0) {
+    tigerSpd *= config.dashTigerSpeedFactor;
+  }
+
   state.tigerX += tigerSpd * dt;
+  if (state.tigerX < config.worldMinX) {
+    state.tigerX = config.worldMinX;
+  }
   enforceTigerLeftOfPlayer(state, config);
 
   checkTerminal(state, config);

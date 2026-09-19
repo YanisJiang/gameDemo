@@ -5,8 +5,9 @@
 struct LevelConfig {
   const char* id;
   const char* titleKey;
+  const char* hintKey;
   GameConfig game;
-  int riverDisplaySlots;  // 右侧河面格子数
+  int riverDisplaySlots;
 };
 
 int levelCount();
