@@ -10,6 +10,16 @@
 
 一共六关。操作始终是这一套，但每一关的压力和规则都会变——有的只是更狠，有的要你重新理解「你在控制什么」。先用普通打法硬撑，再去摸关里的例外。
 
+## 浏览器版（itch）
+
+可直接在浏览器游玩，便于上传 itch.io：
+
+```text
+games/baohu-pinghe/web/
+```
+
+打开 `web/index.html`，或把该目录内 `index.html` / `style.css` / `game.js` 打成 zip（根目录含 `index.html`）上传为 **HTML** 项目。说明见 `web/ITCH.md`。已打好的包：`dist/baohu-web-itch.zip`（若本地编过）。
+
 ## About
 
 Courage without measure: charge and dash between the tiger and the river, and outlast the clock.

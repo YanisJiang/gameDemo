@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>暴虎冯河 · Bao Hu Ping He</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="top">
+      <h1 id="title">暴虎冯河</h1>
+      <p id="tagline" class="tagline">有勇无度</p>
+    </header>
+
+    <section id="screen-cover" class="screen active">
+      <div class="strip cover-strip" id="cover-strip" aria-hidden="true"></div>
+      <p id="cover-prompt" class="prompt">按任意键 / 点击继续</p>
+    </section>
+
+    <section id="screen-select" class="screen">
+      <p id="select-label" class="prompt">选择关卡</p>
+      <div id="level-list" class="level-list"></div>
+      <div class="toolbar">
+        <button type="button" id="btn-zh" class="ghost">中文</button>
+        <button type="button" id="btn-en" class="ghost">English</button>
+      </div>
+    </section>
+
+    <section id="screen-play" class="screen">
+      <div class="hud">
+        <div id="level-line" class="level-line"></div>
+        <div class="meters">
+          <span id="time-line" class="time">0s</span>
+          <div class="charge-wrap" title="charge">
+            <div id="charge-fill" class="charge-fill"></div>
+          </div>
+          <span id="charge-pct">0%</span>
+        </div>
+      </div>
+      <div class="arena-wrap">
+        <div id="arena" class="arena" aria-label="battlefield"></div>
+        <div id="banner" class="banner hidden" role="status"></div>
+      </div>
+      <div class="controls">
+        <div class="control-stage">
+          <button type="button" id="hold-btn" class="hold" tabindex="-1">按住蓄力 · Hold</button>
+          <div id="menu-btns" class="menu-btns hidden">
+            <button type="button" id="btn-next" class="primary">下一关 N</button>
+            <button type="button" id="btn-retry" class="ghost">重玩 R</button>
+            <button type="button" id="btn-back" class="ghost">选关 Q</button>
+          </div>
+        </div>
+        <p class="hint-keys" id="play-keys">空格 / 按住按钮蓄力，松开冲刺 · 撑过计时过关 · 红区或落水则死</p>
+      </div>
+    </section>
+  </div>
+  <script src="game.js"></script>
+</body>
+</html>

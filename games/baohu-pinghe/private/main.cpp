@@ -385,7 +385,7 @@ void drawGame(const GameState& state, const LevelConfig& level, int levelIndex,
   printCenteredLine(levelLine);
 
   if (mode == AppMode::Playing) {
-    printCenteredLine(tr(level.hintKey));
+    printCenteredLine(tr("hud.rules"));
   } else if (mode == AppMode::LevelClear) {
     printCenteredLine(tr("end.level_clear"));
   } else if (mode == AppMode::AllClear) {
