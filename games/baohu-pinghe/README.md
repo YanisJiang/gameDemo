@@ -10,15 +10,32 @@
 
 一共六关。操作始终是这一套，但每一关的压力和规则都会变——有的只是更狠，有的要你重新理解「你在控制什么」。先用普通打法硬撑，再去摸关里的例外。
 
-## 浏览器版（itch）
+## 浏览器版
 
-可直接在浏览器游玩，便于上传 itch.io：
+源码目录：
 
 ```text
 games/baohu-pinghe/web/
 ```
 
-打开 `web/index.html`，或把该目录内 `index.html` / `style.css` / `game.js` 打成 zip（根目录含 `index.html`）上传为 **HTML** 项目。说明见 `web/ITCH.md`。已打好的包：`dist/baohu-web-itch.zip`（若本地编过）。
+本地打开 `web/index.html`，或把 `index.html` / `style.css` / `game.js` 打成 zip（**根目录就要有 `index.html`**）。详细说明见 `web/ITCH.md`。本地打好的包：`dist/baohu-web-itch.zip`（若编过）。
+
+游戏内文案只保留**操作**与**胜利/失败条件**，不剧透各关机制。
+
+### 分发建议
+
+| 渠道 | 用途 |
+|------|------|
+| itch.io（海外） | HTML 项目上传上述 zip；Embed 建议 **960×540**，勾选 Mobile friendly |
+| 自有域名 + 阿里云 ECS/静态托管（国内） | 把三个静态文件放到 Nginx `root`；内地服务器需先完成 **ICP 备案** |
+| 直接发 zip | 网盘 / 群文件；解压后打开 `index.html`（个别浏览器需本地静态服务） |
+
+说明：
+
+- itch 在国内常打不开或极慢，请在 itch 简介里写上**国内可访问地址**。
+- **Gitee Pages 已下线**，不要再当作国内托管方案。
+- 内地备案入口：[阿里云 ICP 代备案](https://beian.aliyun.com/)；通过后网站底部悬挂备案号，并在开通后 30 日内做公安联网备案。
+- 可选曝光：[indienova](https://indienova.com/) 作品页外链到国内站；大众联运可再看 [4399 开放平台](https://open.4399.cn/)（审核与素材要求较多）。
 
 ## About
 
@@ -44,8 +61,14 @@ baohu-pinghe/
 │   ├── i18n.cpp
 │   ├── levels.cpp
 │   └── test_game.cpp
-├── dist/            # 发布产物
-│   └── baohu.exe
+├── web/             # 浏览器 / itch HTML5
+│   ├── index.html
+│   ├── style.css
+│   ├── game.js
+│   └── ITCH.md
+├── dist/            # 发布产物（gitignore）
+│   ├── baohu.exe
+│   └── baohu-web-itch.zip
 ├── build.bat        # 编译发布版
 ├── test.bat         # 跑单元测试
 └── README.md
